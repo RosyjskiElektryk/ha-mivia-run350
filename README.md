@@ -12,8 +12,12 @@ Experimental custom integration for reading data from the **MiVia Run 350** over
 - Send the instantaneous-data enable command `40 01`.
 - Decode version-0 instantaneous packets.
 - Expose steps, total calories, and active calories as Home Assistant sensors.
+- Subscribe to the proprietary MiWell control characteristic and request battery data with `0F 17`.
+- Expose battery percentage and charging state when the watch returns a valid battery response.
 
-The version-0 payload is decoded as big-endian fields: distance (u32), steps (u32), active time (u32), total calories (u16), active calories (u16). Distance and active-time fields are currently parsed but are not exposed because their units/scaling have not yet been independently verified.
+The version-0 Mercury payload is decoded as big-endian fields: distance (u32), steps (u32), active time (u32), total calories (u16), active calories (u16). Distance and active-time fields are currently parsed but are not exposed because their units/scaling have not yet been independently verified.
+
+The companion app's battery response is decoded as: message type `0F`, subcommand `17`, charging flag, battery level. The app treats a charging flag byte of `00` as charging. The reported level is exposed as a percentage after checking that it is in the 0–100 range; this still needs validation across battery levels and charging states on physical hardware.
 
 ## Install manually
 
@@ -28,10 +32,11 @@ The watch must be available to Home Assistant's Bluetooth scanner. Close the ven
 
 ## Known limitations
 
-- The integration opens a BLE connection for each refresh and requests instantaneous data. This is intentionally simple for initial protocol validation, not optimized for battery life.
+- The integration opens a BLE connection for each refresh and requests instantaneous and battery data. This is intentionally simple for initial protocol validation, not optimized for battery life.
 - A fresh instantaneous notification is expected within 10 seconds. If no packet arrives, initial setup will fail with a diagnostic message.
-- Only protocol structure version 0 is decoded.
-- Battery level/charging state and heart-rate events are not implemented yet. Their GATT characteristics or Mercury protocol messages still need to be identified and tested.
+- Battery polling is optional and has a separate 2-second response timeout. A missing battery response does not block steps/calories updates; the last known battery value is retained.
+- Only Mercury protocol structure version 0 is decoded.
+- Heart-rate events and historical activity/sleep data are not implemented yet.
 - The watch's advertised address may be private/randomized on some firmware; if it changes, reconfigure the integration.
 - No claim is made that this prototype is stable or compatible with every Home Assistant release.
 
