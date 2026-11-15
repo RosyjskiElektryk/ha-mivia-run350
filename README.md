@@ -34,6 +34,27 @@ The watch must be available to Home Assistant's Bluetooth scanner. Close the ven
 - The watch's advertised address may be private/randomized on some firmware; if it changes, reconfigure the integration.
 - No claim is made that this prototype is stable or compatible with every Home Assistant release.
 
+## Tested watch firmware
+
+The following versions were reported for the test device:
+
+| Component | Version |
+| --- | --- |
+| Software | `0.0.2.4` |
+| BLE | `00.03.03.10` |
+| OHR | `7804` |
+| GPS | `3` |
+
+## Current BLE connection issue
+
+The watch is advertised to Home Assistant as `FF:03:A6:F1:53:FA`. A Bluetooth proxy may appear as the advertisement `source`; that source address is the receiving Bluetooth adapter/proxy, not the watch address.
+
+The current prototype attempts BLE pairing (`pair=True`) and allows up to 60 seconds for the connection attempt. On the test setup, BlueZ reported:
+
+`org.bluez.Error.ConnectionAttemptFailed: Page Timeout`
+
+This means the BLE link was not established. It is not evidence of an incorrect passkey. Direct connection through the Raspberry Pi Bluetooth adapter and connection through a Bluetooth proxy still need to be isolated and tested.
+
 ## Debug logging
 
 Add to `configuration.yaml`:
