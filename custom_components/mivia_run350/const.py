@@ -21,3 +21,12 @@ OPCODE_GET_BATTERY_LEVEL = 0x17
 BATTERY_RESPONSE_LENGTH = 4
 BATTERY_NOTIFICATION_TIMEOUT = 2
 BATTERY_REQUEST_RETRIES = 1
+
+# Additional notify/indicate characteristics discovered on the watch.
+# These are monitored passively; no undocumented commands are sent to them.
+DIAGNOSTIC_CHANNELS = {
+    "e00f": "0a0ae00f-0a00-1000-8000-00805f9b34fb",
+    "e010": "0a0ae010-0a00-1000-8000-00805f9b34fb",
+    "e011": "0a0ae011-0a00-1000-8000-00805f9b34fb",
+    "1012": "0a0a1012-0a00-1000-8000-00805f9b34fb",
+}
