@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
+from homeassistant.const import PERCENTAGE
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
@@ -17,6 +18,7 @@ async def async_setup_entry(hass, entry, async_add_entities) -> None:
             MiViaStepsSensor(coordinator, entry),
             MiViaCaloriesSensor(coordinator, entry),
             MiViaActiveCaloriesSensor(coordinator, entry),
+            MiViaBatterySensor(coordinator, entry),
         ]
     )
 
@@ -91,4 +93,17 @@ class MiViaActiveCaloriesSensor(MiViaBaseSensor):
             "Active calories",
             "mdi:fire",
             "kcal",
+        )
+
+
+class MiViaBatterySensor(MiViaBaseSensor):
+    """Battery percentage reported by the watch."""
+
+    _attr_device_class = SensorDeviceClass.BATTERY
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_state_class = "measurement"
+
+    def __init__(self, coordinator: MiViaCoordinator, entry) -> None:
+        super().__init__(
+            coordinator, entry, "battery", "Battery", "mdi:battery", PERCENTAGE
         )
