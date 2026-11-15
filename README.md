@@ -11,13 +11,15 @@ Experimental custom integration for reading data from the **MiVia Run 350** over
 - Subscribe to the Mercury control-point notification characteristic.
 - Send the instantaneous-data enable command `40 01`.
 - Decode version-0 instantaneous packets.
-- Expose steps, total calories, and active calories as Home Assistant sensors.
+- Expose steps, total calories, active calories, raw distance, and raw active time.
+- Expose RSSI when it is available from Home Assistant's Bluetooth scanner.
+- Expose experimental BLE diagnostics for notification traffic and connection state.
 - Subscribe to the proprietary MiWell control characteristic and request battery data with `0F 17`.
 - Select the battery write mode from the characteristic's advertised GATT properties.
 - Retry a missing battery request once; missing battery data does not block activity updates.
 - Expose battery percentage and charging state when the watch returns a valid battery response.
 
-The version-0 Mercury payload is decoded as big-endian fields: distance (u32), steps (u32), active time (u32), total calories (u16), active calories (u16). Distance and active-time fields are currently parsed but are not exposed because their units/scaling have not yet been independently verified.
+The version-0 Mercury payload is decoded as big-endian fields: distance (u32), steps (u32), active time (u32), total calories (u16), active calories (u16). Distance and active-time fields are exposed as raw values because their units/scaling have not yet been independently verified.
 
 The companion app's battery response is decoded as: message type `0F`, subcommand `17`, charging flag, battery level. The app treats a charging flag byte of `00` as charging. The reported level is exposed as a percentage after checking that it is in the 0–100 range; this still needs validation across battery levels and charging states on physical hardware.
 
@@ -59,7 +61,11 @@ The watch is advertised to Home Assistant as `FF:03:A6:F1:53:FA`. A Bluetooth pr
 
 The prototype attempts BLE pairing (`pair=True`) and allows up to 60 seconds for the connection attempt. BlueZ previously reported `org.bluez.Error.ConnectionAttemptFailed: Page Timeout`, and ESPHome Bluetooth Proxy reported GATT connection errors. These indicate connection-layer problems, not proof of an incorrect passkey or a packet-decoding problem.
 
-## Debug logging
+## Diagnostics and debug logging
+
+The integration exposes diagnostic entities for the last known connection state and communication stage, last error, BLE error and timeout counters, TX/RX packet counters, last transmitted packet/channel/time, last successful update, connection duration, and per-characteristic notification counts/last payload/last-seen timestamps. These values are retained between refreshes where possible. Raw payloads are available in the diagnostic entities and DEBUG logs. Unknown notification payloads are recorded without sending undocumented commands.
+
+Bluetooth addresses are masked in integration log messages. Raw packet payloads can still contain device-specific or personal information; review logs before sharing them publicly.
 
 Add to `configuration.yaml`:
 

@@ -27,6 +27,23 @@ async def async_setup_entry(hass, entry, async_add_entities) -> None:
                 for channel in ("e00a", "1011", "e00f", "e010", "e011", "1012")
                 for metric in ("count", "last_packet", "last_seen")
             ],
+            *[
+                MiViaSystemDiagnosticSensor(coordinator, entry, key, name, icon)
+                for key, name, icon in (
+                    ("connection_state", "Connection state", "mdi:bluetooth-connect"),
+                    ("last_stage", "Last communication stage", "mdi:timeline-text-outline"),
+                    ("last_error", "Last BLE error", "mdi:alert-circle-outline"),
+                    ("ble_error_count", "BLE errors", "mdi:alert-counter"),
+                    ("timeout_count", "Timeouts", "mdi:timer-alert-outline"),
+                    ("tx_count", "Sent packets", "mdi:upload-network-outline"),
+                    ("rx_count", "Received packets", "mdi:download-network-outline"),
+                    ("tx_last_channel", "Last TX channel", "mdi:bluetooth-transfer"),
+                    ("tx_last_packet", "Last TX packet", "mdi:code-braces"),
+                    ("tx_last_seen", "Last TX time", "mdi:clock-outline"),
+                    ("last_success", "Last successful update", "mdi:check-circle-outline"),
+                    ("connection_duration", "Last connection duration", "mdi:timer-outline"),
+                )
+            ],
         ]
     )
 
@@ -182,3 +199,26 @@ class MiViaDiagnosticSensor(MiViaBaseSensor):
             self._attr_state_class = "total_increasing"
         elif metric == "last_seen":
             self._attr_device_class = SensorDeviceClass.TIMESTAMP
+
+
+class MiViaSystemDiagnosticSensor(MiViaBaseSensor):
+    """Connection and protocol diagnostics."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: MiViaCoordinator,
+        entry,
+        key: str,
+        name: str,
+        icon: str,
+    ) -> None:
+        super().__init__(coordinator, entry, key, name, icon)
+        if key in {"ble_error_count", "timeout_count", "tx_count", "rx_count"}:
+            self._attr_state_class = "total_increasing"
+        elif key in {"tx_last_seen", "last_success"}:
+            self._attr_device_class = SensorDeviceClass.TIMESTAMP
+        elif key == "connection_duration":
+            self._attr_native_unit_of_measurement = "s"
+            self._attr_suggested_display_precision = 2

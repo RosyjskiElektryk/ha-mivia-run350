@@ -31,6 +31,14 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+
+def _mask_address(address: str) -> str:
+    """Mask the last three octets of a Bluetooth address for log output."""
+    parts = address.split(":")
+    if len(parts) == 6:
+        return ":".join((*parts[:3], "**", "**", "**"))
+    return "<redacted>"
+
 # Mercury uses Garmin FIT field numbers as packet type codes:
 # 0xFD = event packet, 0xFE = response packet.
 MERCURY_EVENT_PACKET = 0xFD
@@ -147,12 +155,35 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
 
     async def _async_update_data(self) -> dict:
         """Connect, subscribe to notifications and request watch data."""
+        started_at = datetime.now(timezone.utc)
+        packet_data: dict = {}
+
+        def increment_counter(key: str) -> None:
+            packet_data[key] = packet_data.get(key, self._last_data.get(key, 0)) + 1
+
+        def set_stage(stage: str) -> None:
+            packet_data["last_stage"] = stage
+            _LOGGER.debug("MiVia stage: %s", stage)
+
+        def record_tx(channel: str, raw: bytes) -> None:
+            increment_counter("tx_count")
+            packet_data["tx_last_channel"] = channel
+            packet_data["tx_last_packet"] = raw.hex(" ")
+            packet_data["tx_last_seen"] = datetime.now(timezone.utc)
+            _LOGGER.debug("MiVia TX channel=%s payload=%s", channel, raw.hex(" "))
+
+        set_stage("bluetooth_discovery")
         device = bluetooth.async_ble_device_from_address(
             self.hass, self.address, connectable=True
         )
         if device is None:
+            increment_counter("ble_error_count")
+            packet_data["connection_state"] = "not_found"
+            packet_data["last_error"] = "Device not found by the Home Assistant Bluetooth scanner"
+            packet_data["connection_duration"] = (datetime.now(timezone.utc) - started_at).total_seconds()
+            self._last_data.update(packet_data)
             raise UpdateFailed(
-                f"MiVia {self.address} not found by the Home Assistant Bluetooth scanner"
+                f"MiVia {_mask_address(self.address)} not found by the Home Assistant Bluetooth scanner"
             )
 
         debug_enabled = _LOGGER.isEnabledFor(logging.DEBUG)
@@ -162,14 +193,13 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
         if debug_enabled:
             _LOGGER.debug(
                 "MiVia BLE device selected: address=%s name=%s rssi=%s",
-                getattr(device, "address", self.address),
+                _mask_address(getattr(device, "address", self.address)),
                 getattr(device, "name", None),
                 getattr(device, "rssi", None),
             )
 
         instantaneous_received = asyncio.Event()
         battery_received = asyncio.Event()
-        packet_data: dict = {}
         instantaneous_struct_version: int | None = None
         battery_notify_started = False
         battery_request_sent = False
@@ -185,6 +215,7 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
             ) + 1
             packet_data[f"{prefix}_last_packet"] = raw.hex(" ")
             packet_data[f"{prefix}_last_seen"] = datetime.now(timezone.utc)
+            increment_counter("rx_count")
 
         def instantaneous_handler(_sender, payload: bytearray) -> None:
             nonlocal instantaneous_struct_version
@@ -236,6 +267,7 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
 
         client = None
         try:
+            set_stage("connecting")
             client = await establish_connection(
                 BleakClient,
                 device,
@@ -245,10 +277,12 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                 timeout=60,
             )
 
+            packet_data["connection_state"] = "connected"
+            set_stage("gatt_discovery")
             if debug_enabled:
                 _LOGGER.debug(
                     "MiVia BLE connected: address=%s mtu=%s",
-                    self.address,
+                    _mask_address(self.address),
                     getattr(client, "mtu_size", None),
                 )
                 # Dump the complete GATT database discovered by Bleak.
@@ -307,6 +341,7 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                     BATTERY_CONTROL_CHARACTERISTIC_UUID,
                 )
 
+            set_stage("subscribe_battery")
             try:
                 await client.start_notify(
                     BATTERY_CONTROL_CHARACTERISTIC_UUID, battery_handler
@@ -323,6 +358,7 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                     exc_info=True,
                 )
 
+            set_stage("subscribe_mercury")
             await client.start_notify(
                 CONTROL_POINT_CHARACTERISTIC_UUID, instantaneous_handler
             )
@@ -366,6 +402,7 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                         )
 
             # Battery data is optional; a failure must not block activity updates.
+            set_stage("request_battery")
             if battery_notify_started and battery_characteristic is not None:
                 try:
                     battery_command = bytes(
@@ -377,20 +414,28 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                         battery_write_response,
                         battery_command.hex(" "),
                     )
+                    record_tx("e00a", battery_command)
                     await client.write_gatt_char(
                         BATTERY_CONTROL_CHARACTERISTIC_UUID,
                         battery_command,
                         response=battery_write_response,
                     )
                     battery_request_sent = True
-                except Exception:  # noqa: BLE001
+                except Exception as err:  # noqa: BLE001
+                    packet_data["last_error"] = (
+                        "Battery request write failed: "
+                        + str(err).replace(self.address, _mask_address(self.address))[:180]
+                    )
+                    increment_counter("ble_error_count")
                     _LOGGER.warning(
                         "Could not request MiVia battery data; continuing with activity data",
                         exc_info=True,
                     )
 
             # Mercury.setInstantaneousAvailability(true, ...) sends exactly 40 01.
+            set_stage("request_instantaneous")
             activity_command = bytes((OPCODE_INSTANTANEOUS_DATA, 0x01))
+            record_tx("1011", activity_command)
             _LOGGER.debug(
                 "MiVia TX instantaneous characteristic=%s response=True payload=%s",
                 CONTROL_POINT_CHARACTERISTIC_UUID,
@@ -402,12 +447,14 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                 response=True,
             )
 
+            set_stage("wait_instantaneous")
             await asyncio.wait_for(
                 instantaneous_received.wait(), timeout=NOTIFICATION_TIMEOUT
             )
 
             # Some firmware drops the first battery query. Retry once, but never
             # fail the coordinator refresh solely because battery data is absent.
+            set_stage("wait_battery")
             if battery_request_sent:
                 for attempt in range(BATTERY_REQUEST_RETRIES + 1):
                     if battery_received.is_set():
@@ -419,9 +466,13 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                             BATTERY_REQUEST_RETRIES,
                         )
                         try:
+                            retry_command = bytes(
+                                (OPCODE_GET_DEVICE_INFO, OPCODE_GET_BATTERY_LEVEL)
+                            )
+                            record_tx("e00a", retry_command)
                             await client.write_gatt_char(
                                 BATTERY_CONTROL_CHARACTERISTIC_UUID,
-                                bytes((OPCODE_GET_DEVICE_INFO, OPCODE_GET_BATTERY_LEVEL)),
+                                retry_command,
                                 response=battery_write_response,
                             )
                         except Exception:  # noqa: BLE001
@@ -436,16 +487,35 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                             timeout=BATTERY_NOTIFICATION_TIMEOUT,
                         )
                     except asyncio.TimeoutError:
+                        increment_counter("timeout_count")
                         if attempt == BATTERY_REQUEST_RETRIES:
+                            packet_data["last_error"] = "Battery response timeout"
                             _LOGGER.warning(
                                 "MiVia battery response timed out after %s request(s)",
                                 attempt + 1,
                             )
 
+            packet_data["connection_state"] = "idle"
+            packet_data["last_stage"] = "complete"
+            packet_data["last_success"] = datetime.now(timezone.utc)
+            if battery_received.is_set():
+                packet_data["last_error"] = None
+            elif battery_request_sent and "last_error" not in packet_data:
+                packet_data["last_error"] = "Battery response timeout or no valid response"
+            packet_data["connection_duration"] = (
+                datetime.now(timezone.utc) - started_at
+            ).total_seconds()
             self._last_data.update(packet_data)
             return dict(self._last_data)
 
         except asyncio.TimeoutError as err:
+            increment_counter("timeout_count")
+            packet_data["connection_state"] = "timeout"
+            packet_data["last_error"] = "Instantaneous-data notification timeout"
+            packet_data["last_stage"] = "wait_instantaneous"
+            packet_data["connection_duration"] = (
+                datetime.now(timezone.utc) - started_at
+            ).total_seconds()
             self._last_data.update(packet_data)
             if "steps" in self._last_data:
                 _LOGGER.warning(
@@ -457,7 +527,21 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                 "within 10 seconds. Check the BLE connection and enable debug logging."
             ) from err
         except Exception as err:
-            raise UpdateFailed(f"MiVia BLE communication failed: {err}") from err
+            increment_counter("ble_error_count")
+            packet_data["connection_state"] = "error"
+            packet_data["last_stage"] = packet_data.get("last_stage", "unknown")
+            packet_data["last_error"] = str(err).replace(
+                self.address, _mask_address(self.address)
+            )[:255]
+            packet_data["connection_duration"] = (
+                datetime.now(timezone.utc) - started_at
+            ).total_seconds()
+            self._last_data.update(packet_data)
+            _LOGGER.exception(
+                "MiVia BLE communication failed at stage %s", packet_data["last_stage"]
+            )
+            safe_error = str(err).replace(self.address, _mask_address(self.address))
+            raise UpdateFailed(f"MiVia BLE communication failed: {safe_error}") from err
         finally:
             if client is not None and client.is_connected:
                 for characteristic in (
@@ -475,4 +559,6 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                         )
                 await client.disconnect()
                 if debug_enabled:
-                    _LOGGER.debug("MiVia BLE disconnected: address=%s", self.address)
+                    _LOGGER.debug(
+                        "MiVia BLE disconnected: address=%s", _mask_address(self.address)
+                    )
