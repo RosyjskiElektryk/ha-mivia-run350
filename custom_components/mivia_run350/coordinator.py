@@ -510,9 +510,9 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
 
         except asyncio.TimeoutError as err:
             increment_counter("timeout_count")
+            failed_stage = packet_data.get("last_stage", "unknown")
             packet_data["connection_state"] = "timeout"
-            packet_data["last_error"] = "Instantaneous-data notification timeout"
-            packet_data["last_stage"] = "wait_instantaneous"
+            packet_data["last_error"] = f"Timeout during {failed_stage}"
             packet_data["connection_duration"] = (
                 datetime.now(timezone.utc) - started_at
             ).total_seconds()
