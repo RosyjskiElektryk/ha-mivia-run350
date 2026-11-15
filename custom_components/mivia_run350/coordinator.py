@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import timedelta
 
 from bleak import BleakClient
 from bleak_retry_connector import establish_connection
@@ -68,7 +69,7 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=None,
+            update_interval=timedelta(minutes=1),
         )
 
     async def _async_update_data(self) -> dict:
