@@ -22,8 +22,6 @@ async def async_setup_entry(hass, entry, async_add_entities) -> None:
             MiViaActiveTimeRawSensor(coordinator, entry),
             MiViaBatterySensor(coordinator, entry),
             MiViaRssiSensor(coordinator, entry),
-            MiViaHeartRateSensor(coordinator, entry),
-            MiViaActivityClassSensor(coordinator, entry),
             *[
                 MiViaDiagnosticSensor(coordinator, entry, channel, metric)
                 for channel in ("e00a", "1011", "e00f", "e010", "e011", "1012")
@@ -152,35 +150,6 @@ class MiViaRssiSensor(MiViaBaseSensor):
 
     def __init__(self, coordinator: MiViaCoordinator, entry) -> None:
         super().__init__(coordinator, entry, "rssi", "Bluetooth signal", "mdi:bluetooth")
-
-
-class MiViaHeartRateSensor(MiViaBaseSensor):
-    """Live heart rate reported by the watch."""
-
-    _attr_device_class = SensorDeviceClass.HEART_RATE
-    _attr_native_unit_of_measurement = "bpm"
-    _attr_state_class = "measurement"
-
-    def __init__(self, coordinator: MiViaCoordinator, entry) -> None:
-        super().__init__(
-            coordinator, entry, "heart_rate", "Heart rate", "mdi:heart-pulse", "bpm"
-        )
-
-
-class MiViaActivityClassSensor(MiViaBaseSensor):
-    """Raw activity-class identifier reported by the watch."""
-
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_state_class = "measurement"
-
-    def __init__(self, coordinator: MiViaCoordinator, entry) -> None:
-        super().__init__(
-            coordinator,
-            entry,
-            "activity_class",
-            "Activity class (raw)",
-            "mdi:run",
-        )
 
 
 class MiViaDiagnosticSensor(MiViaBaseSensor):
