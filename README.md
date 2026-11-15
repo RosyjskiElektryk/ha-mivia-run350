@@ -2,17 +2,18 @@
 
 Experimental custom integration for reading data from the **MiVia Run 350** over BLE.
 
-> **Status: proof of concept.** The first target is the daily step count. It has not yet been tested end-to-end in Home Assistant. BLE packet decoding is based on protocol behavior observed while studying the watch and its companion app; no app code, APK, firmware, or vendor library is included here.
+> **Status: proof of concept.** The integration has been tested on one MiVia Run 350 device. BLE packet decoding is based on protocol behavior observed while studying the watch and its companion app; no app code, APK, firmware, or vendor library is included here.
 
 ## Current scope
 
 - Connect to the watch using its Bluetooth address.
 - Attempt BLE pairing/bonding before connecting. If the watch requires a passkey, the Bluetooth host must be able to handle the pairing prompt; this integration does not guess or hardcode a PIN.
 - Subscribe to the Mercury control-point notification characteristic.
-- Send the documented-by-observation instantaneous-data enable command `40 01`.
-- Decode version-0 instantaneous packets and expose the step count.
+- Send the instantaneous-data enable command `40 01`.
+- Decode version-0 instantaneous packets.
+- Expose steps, total calories, and active calories as Home Assistant sensors.
 
-The version-0 payload is decoded as big-endian fields: distance (u32), steps (u32), active time (u32), total calories (u16), active calories (u16). The implementation currently exposes only steps.
+The version-0 payload is decoded as big-endian fields: distance (u32), steps (u32), active time (u32), total calories (u16), active calories (u16). Distance and active-time fields are currently parsed but are not exposed because their units/scaling have not yet been independently verified.
 
 ## Install manually
 
@@ -30,7 +31,7 @@ The watch must be available to Home Assistant's Bluetooth scanner. Close the ven
 - The integration opens a BLE connection for each refresh and requests instantaneous data. This is intentionally simple for initial protocol validation, not optimized for battery life.
 - A fresh instantaneous notification is expected within 10 seconds. If no packet arrives, initial setup will fail with a diagnostic message.
 - Only protocol structure version 0 is decoded.
-- Heart-rate events are a separate Mercury event and are not enabled by this initial prototype.
+- Battery level/charging state and heart-rate events are not implemented yet. Their GATT characteristics or Mercury protocol messages still need to be identified and tested.
 - The watch's advertised address may be private/randomized on some firmware; if it changes, reconfigure the integration.
 - No claim is made that this prototype is stable or compatible with every Home Assistant release.
 
@@ -49,11 +50,7 @@ The following versions were reported for the test device:
 
 The watch is advertised to Home Assistant as `FF:03:A6:F1:53:FA`. A Bluetooth proxy may appear as the advertisement `source`; that source address is the receiving Bluetooth adapter/proxy, not the watch address.
 
-The current prototype attempts BLE pairing (`pair=True`) and allows up to 60 seconds for the connection attempt. On the test setup, BlueZ reported:
-
-`org.bluez.Error.ConnectionAttemptFailed: Page Timeout`
-
-This means the BLE link was not established. It is not evidence of an incorrect passkey. Direct connection through the Raspberry Pi Bluetooth adapter and connection through a Bluetooth proxy still need to be isolated and tested.
+The prototype attempts BLE pairing (`pair=True`) and allows up to 60 seconds for the connection attempt. BlueZ previously reported `org.bluez.Error.ConnectionAttemptFailed: Page Timeout`, and ESPHome Bluetooth Proxy reported GATT connection errors. These indicate connection-layer problems, not proof of an incorrect passkey or a packet-decoding problem.
 
 ## Debug logging
 
