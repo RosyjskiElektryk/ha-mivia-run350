@@ -10,6 +10,7 @@ from bleak import BleakClient
 from bleak_retry_connector import establish_connection
 
 from homeassistant.components import bluetooth
+from homeassistant.components.bluetooth import BluetoothScanningMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -23,6 +24,7 @@ from .const import (
     CONTROL_POINT_CHARACTERISTIC_UUID,
     DOMAIN,
     DIAGNOSTIC_CHANNELS,
+    EVENT_ACTIVITY_DATA_CHANGED,
     EVENT_INSTANTANEOUS_DATA,
     OPCODE_GET_BATTERY_LEVEL,
     OPCODE_GET_DEVICE_INFO,
@@ -111,6 +113,32 @@ def parse_notification(data: bytes, struct_version: int | None) -> dict | None:
     }
 
 
+def parse_activity_data_changed(data: bytes) -> dict | None:
+    """Decode a Mercury activity-change event (heart rate or activity class)."""
+    if (
+        len(data) < 7
+        or data[0] != MERCURY_EVENT_PACKET
+        or data[1] != EVENT_ACTIVITY_DATA_CHANGED
+    ):
+        return None
+
+    # Decoder.uint8() reads the type, then Decoder.uint32() reads big-endian.
+    data_type = data[2]
+    value = int.from_bytes(data[3:7], "big")
+
+    if data_type == 1:
+        return {"heart_rate": value}
+    if data_type == 2:
+        return {"activity_class": value}
+
+    _LOGGER.debug(
+        "Ignoring unknown MiVia activity-change type=%s payload=%s",
+        data_type,
+        data.hex(" "),
+    )
+    return None
+
+
 def parse_battery_notification(data: bytes) -> dict | None:
     """Decode a proprietary MiWell battery-level response."""
     if (
@@ -144,6 +172,27 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
             name=DOMAIN,
             update_interval=timedelta(minutes=1),
         )
+
+        # RSSI is supplied by BLE advertisements, not by the connected device object.
+        self._unsub_bluetooth = bluetooth.async_register_callback(
+            hass,
+            self._async_handle_advertisement,
+            {"address": self.address},
+            BluetoothScanningMode.ACTIVE,
+        )
+
+    def _async_handle_advertisement(self, service_info) -> None:
+        """Update RSSI from advertisements reported by Home Assistant."""
+        rssi = service_info.rssi
+        if not isinstance(rssi, (int, float)):
+            return
+        self._last_data["rssi"] = rssi
+        if self.data is not None:
+            self.async_set_updated_data(dict(self._last_data))
+
+    def async_shutdown(self) -> None:
+        """Unregister the Bluetooth advertisement callback."""
+        self._unsub_bluetooth()
 
     async def _async_update_data(self) -> dict:
         """Connect, subscribe to notifications and request watch data."""
@@ -192,6 +241,12 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
             raw = bytes(payload)
             record_diagnostic_packet("1011", raw)
             _LOGGER.debug("MiVia RX instantaneous %s: %s", _sender, raw.hex(" "))
+
+            activity_data = parse_activity_data_changed(raw)
+            if activity_data is not None:
+                packet_data.update(activity_data)
+                _LOGGER.debug("MiVia activity-change data parsed: %s", activity_data)
+                return
 
             response_version = parse_instantaneous_response(raw)
             if response_version is not None:
