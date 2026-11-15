@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from bleak import BleakClient
 from bleak_retry_connector import establish_connection
@@ -22,6 +22,7 @@ from .const import (
     CONF_ADDRESS,
     CONTROL_POINT_CHARACTERISTIC_UUID,
     DOMAIN,
+    DIAGNOSTIC_CHANNELS,
     EVENT_INSTANTANEOUS_DATA,
     OPCODE_GET_BATTERY_LEVEL,
     OPCODE_GET_DEVICE_INFO,
@@ -155,6 +156,9 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
             )
 
         debug_enabled = _LOGGER.isEnabledFor(logging.DEBUG)
+        rssi = getattr(device, "rssi", None)
+        if isinstance(rssi, (int, float)):
+            self._last_data["rssi"] = rssi
         if debug_enabled:
             _LOGGER.debug(
                 "MiVia BLE device selected: address=%s name=%s rssi=%s",
@@ -170,7 +174,7 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
         battery_notify_started = False
         battery_request_sent = False
         battery_write_response = False
-        debug_notify_started: list[str] = []
+        diagnostic_notify_started: list[str] = []
 
         def instantaneous_handler(_sender, payload: bytearray) -> None:
             nonlocal instantaneous_struct_version
@@ -205,12 +209,22 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                     "MiVia battery-channel notification did not match 0F 17 response"
                 )
 
-        def generic_notification_handler(_sender, payload: bytearray) -> None:
-            _LOGGER.debug(
-                "MiVia RX GATT notification sender=%s payload=%s",
-                _sender,
-                bytes(payload).hex(" "),
-            )
+        def make_diagnostic_handler(channel: str):
+            """Create a handler that records raw packets from one GATT channel."""
+            def handler(_sender, payload: bytearray) -> None:
+                raw = bytes(payload)
+                prefix = f"diag_{channel}"
+                count_key = f"{prefix}_count"
+                packet_data[count_key] = self._last_data.get(count_key, 0) + 1
+                packet_data[f"{prefix}_last_packet"] = raw.hex(" ")
+                packet_data[f"{prefix}_last_seen"] = datetime.now(timezone.utc)
+                _LOGGER.debug(
+                    "MiVia RX diagnostic channel=%s sender=%s payload=%s",
+                    channel,
+                    _sender,
+                    raw.hex(" "),
+                )
+            return handler
 
         client = None
         try:
@@ -305,41 +319,43 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                 CONTROL_POINT_CHARACTERISTIC_UUID, instantaneous_handler
             )
 
-            # In DEBUG mode, also subscribe to every other notify/indicate
-            # characteristic so that unsolicited watch data can be inspected.
-            # This is diagnostic only; normal operation does not subscribe to
-            # unrelated characteristics.
-            if debug_enabled:
-                known_characteristics = {
-                    BATTERY_CONTROL_CHARACTERISTIC_UUID.lower(),
-                    CONTROL_POINT_CHARACTERISTIC_UUID.lower(),
-                }
-                for service in client.services:
-                    for characteristic in service.characteristics:
-                        uuid = characteristic.uuid.lower()
-                        properties = {
-                            prop.lower() for prop in characteristic.properties
-                        }
-                        if (
-                            uuid in known_characteristics
-                            or not properties.intersection({"notify", "indicate"})
-                        ):
-                            continue
-                        try:
-                            await client.start_notify(
-                                characteristic.uuid, generic_notification_handler
-                            )
-                            debug_notify_started.append(characteristic.uuid)
-                            _LOGGER.debug(
-                                "MiVia diagnostic subscription started: %s",
-                                characteristic.uuid,
-                            )
-                        except Exception:  # noqa: BLE001
-                            _LOGGER.debug(
-                                "MiVia diagnostic subscription failed: %s",
-                                characteristic.uuid,
-                                exc_info=True,
-                            )
+            # Subscribe to every additional notify/indicate characteristic.
+            # This is passive diagnostics: no undocumented writes are sent.
+            known_characteristics = {
+                BATTERY_CONTROL_CHARACTERISTIC_UUID.lower(),
+                CONTROL_POINT_CHARACTERISTIC_UUID.lower(),
+            }
+            channel_by_uuid = {
+                uuid.lower(): channel for channel, uuid in DIAGNOSTIC_CHANNELS.items()
+            }
+            for service in client.services:
+                for characteristic in service.characteristics:
+                    uuid = characteristic.uuid.lower()
+                    properties = {
+                        prop.lower() for prop in characteristic.properties
+                    }
+                    if (
+                        uuid in known_characteristics
+                        or not properties.intersection({"notify", "indicate"})
+                    ):
+                        continue
+                    channel = channel_by_uuid.get(uuid, uuid.replace("-", "")[-4:])
+                    try:
+                        await client.start_notify(
+                            characteristic.uuid, make_diagnostic_handler(channel)
+                        )
+                        diagnostic_notify_started.append(characteristic.uuid)
+                        _LOGGER.debug(
+                            "MiVia diagnostic subscription started: channel=%s uuid=%s",
+                            channel,
+                            characteristic.uuid,
+                        )
+                    except Exception:  # noqa: BLE001
+                        _LOGGER.debug(
+                            "MiVia diagnostic subscription failed: %s",
+                            characteristic.uuid,
+                            exc_info=True,
+                        )
 
             # Battery data is optional; a failure must not block activity updates.
             if battery_notify_started and battery_characteristic is not None:
@@ -439,7 +455,7 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                 for characteristic in (
                     CONTROL_POINT_CHARACTERISTIC_UUID,
                     BATTERY_CONTROL_CHARACTERISTIC_UUID,
-                    *debug_notify_started,
+                    *diagnostic_notify_started,
                 ):
                     try:
                         await client.stop_notify(characteristic)
