@@ -10,7 +10,6 @@ from bleak import BleakClient
 from bleak_retry_connector import establish_connection
 
 from homeassistant.components import bluetooth
-from homeassistant.components.bluetooth import BluetoothScanningMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -174,11 +173,10 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
         )
 
         # RSSI is supplied by BLE advertisements, not by the connected device object.
-        self._unsub_bluetooth = bluetooth.async_register_callback(
+        self._unsub_bluetooth = bluetooth.async_register_advertisement_callback(
             hass,
             self._async_handle_advertisement,
-            {"address": self.address},
-            BluetoothScanningMode.ACTIVE,
+            self.address,
         )
 
     def _async_handle_advertisement(self, service_info) -> None:
