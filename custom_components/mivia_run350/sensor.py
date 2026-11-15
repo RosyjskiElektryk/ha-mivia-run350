@@ -24,7 +24,7 @@ async def async_setup_entry(hass, entry, async_add_entities) -> None:
             MiViaRssiSensor(coordinator, entry),
             *[
                 MiViaDiagnosticSensor(coordinator, entry, channel, metric)
-                for channel in ("e00f", "e010", "e011", "1012")
+                for channel in ("e00a", "1011", "e00f", "e010", "e011", "1012")
                 for metric in ("count", "last_packet", "last_seen")
             ],
         ]
