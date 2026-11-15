@@ -13,6 +13,8 @@ Experimental custom integration for reading data from the **MiVia Run 350** over
 - Decode version-0 instantaneous packets.
 - Expose steps, total calories, and active calories as Home Assistant sensors.
 - Subscribe to the proprietary MiWell control characteristic and request battery data with `0F 17`.
+- Select the battery write mode from the characteristic's advertised GATT properties.
+- Retry a missing battery request once; missing battery data does not block activity updates.
 - Expose battery percentage and charging state when the watch returns a valid battery response.
 
 The version-0 Mercury payload is decoded as big-endian fields: distance (u32), steps (u32), active time (u32), total calories (u16), active calories (u16). Distance and active-time fields are currently parsed but are not exposed because their units/scaling have not yet been independently verified.
@@ -34,7 +36,7 @@ The watch must be available to Home Assistant's Bluetooth scanner. Close the ven
 
 - The integration opens a BLE connection for each refresh and requests instantaneous and battery data. This is intentionally simple for initial protocol validation, not optimized for battery life.
 - A fresh instantaneous notification is expected within 10 seconds. If no packet arrives, initial setup will fail with a diagnostic message.
-- Battery polling is optional and has a separate 2-second response timeout. A missing battery response does not block steps/calories updates; the last known battery value is retained.
+- Battery polling is optional and has a separate response timeout. One retry is attempted; a missing battery response does not prevent steps/calories updates and the last known battery value is retained.
 - Only Mercury protocol structure version 0 is decoded.
 - Heart-rate events and historical activity/sleep data are not implemented yet.
 - The watch's advertised address may be private/randomized on some firmware; if it changes, reconfigure the integration.
@@ -69,7 +71,7 @@ logger:
     bleak: debug
 ```
 
-Restart Home Assistant and inspect the logs if setup fails.
+Restart Home Assistant and inspect the logs if setup fails. Battery diagnostics include the discovered write properties, subscription result, raw notifications, and retry outcome.
 
 ## License
 

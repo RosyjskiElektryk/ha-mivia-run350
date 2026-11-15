@@ -17,6 +17,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .const import (
     BATTERY_CONTROL_CHARACTERISTIC_UUID,
     BATTERY_NOTIFICATION_TIMEOUT,
+    BATTERY_REQUEST_RETRIES,
     BATTERY_RESPONSE_LENGTH,
     CONF_ADDRESS,
     CONTROL_POINT_CHARACTERISTIC_UUID,
@@ -122,6 +123,7 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
         packet_data: dict = {}
         battery_notify_started = False
         battery_request_sent = False
+        battery_write_response = False
         debug_notify_started: list[str] = []
 
         def instantaneous_handler(_sender, payload: bytearray) -> None:
@@ -140,6 +142,10 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                 _LOGGER.debug("MiVia battery parsed: %s", parsed)
                 packet_data.update(parsed)
                 battery_received.set()
+            else:
+                _LOGGER.debug(
+                    "MiVia battery-channel notification did not match 0F 17 response"
+                )
 
         def generic_notification_handler(_sender, payload: bytearray) -> None:
             _LOGGER.debug(
@@ -190,12 +196,46 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                                 descriptor.handle,
                             )
 
-            # Keep the known protocol characteristics on their dedicated parsers.
+            # The companion app sends 0F 17 to this exact MiWell characteristic.
+            # Select the GATT write mode from the properties reported by the watch.
+            battery_characteristic = next(
+                (
+                    characteristic
+                    for service in client.services
+                    for characteristic in service.characteristics
+                    if characteristic.uuid.lower()
+                    == BATTERY_CONTROL_CHARACTERISTIC_UUID.lower()
+                ),
+                None,
+            )
+            if battery_characteristic is not None:
+                battery_properties = {
+                    prop.lower() for prop in battery_characteristic.properties
+                }
+                if "write-without-response" in battery_properties:
+                    battery_write_response = False
+                elif "write" in battery_properties:
+                    battery_write_response = True
+                else:
+                    _LOGGER.warning(
+                        "MiVia battery characteristic has no supported write property: %s",
+                        sorted(battery_properties),
+                    )
+            else:
+                _LOGGER.warning(
+                    "MiVia battery characteristic %s was not found in GATT",
+                    BATTERY_CONTROL_CHARACTERISTIC_UUID,
+                )
+
             try:
                 await client.start_notify(
                     BATTERY_CONTROL_CHARACTERISTIC_UUID, battery_handler
                 )
                 battery_notify_started = True
+                _LOGGER.debug(
+                    "MiVia battery notifications enabled on %s",
+                    BATTERY_CONTROL_CHARACTERISTIC_UUID,
+                )
             except Exception:  # noqa: BLE001
                 _LOGGER.warning(
                     "Could not subscribe to MiVia battery notifications; "
@@ -243,28 +283,29 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                                 exc_info=True,
                             )
 
-            # Battery data uses a proprietary MiWell characteristic.
-            # It is optional: failure must not prevent activity-data updates.
-            try:
-                battery_command = bytes(
-                    (OPCODE_GET_DEVICE_INFO, OPCODE_GET_BATTERY_LEVEL)
-                )
-                _LOGGER.debug(
-                    "MiVia TX battery characteristic=%s response=True payload=%s",
-                    BATTERY_CONTROL_CHARACTERISTIC_UUID,
-                    battery_command.hex(" "),
-                )
-                await client.write_gatt_char(
-                    BATTERY_CONTROL_CHARACTERISTIC_UUID,
-                    battery_command,
-                    response=False,
-                )
-                battery_request_sent = True
-            except Exception:  # noqa: BLE001
-                _LOGGER.warning(
-                    "Could not request MiVia battery data; continuing with activity data",
-                    exc_info=True,
-                )
+            # Battery data is optional; a failure must not block activity updates.
+            if battery_notify_started and battery_characteristic is not None:
+                try:
+                    battery_command = bytes(
+                        (OPCODE_GET_DEVICE_INFO, OPCODE_GET_BATTERY_LEVEL)
+                    )
+                    _LOGGER.debug(
+                        "MiVia TX battery characteristic=%s response=%s payload=%s",
+                        BATTERY_CONTROL_CHARACTERISTIC_UUID,
+                        battery_write_response,
+                        battery_command.hex(" "),
+                    )
+                    await client.write_gatt_char(
+                        BATTERY_CONTROL_CHARACTERISTIC_UUID,
+                        battery_command,
+                        response=battery_write_response,
+                    )
+                    battery_request_sent = True
+                except Exception:  # noqa: BLE001
+                    _LOGGER.warning(
+                        "Could not request MiVia battery data; continuing with activity data",
+                        exc_info=True,
+                    )
 
             # Mercury.setInstantaneousAvailability(true, ...) sends exactly 40 01.
             activity_command = bytes((OPCODE_INSTANTANEOUS_DATA, 0x01))
@@ -283,13 +324,41 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                 instantaneous_received.wait(), timeout=NOTIFICATION_TIMEOUT
             )
 
-            if battery_request_sent and not battery_received.is_set():
-                try:
-                    await asyncio.wait_for(
-                        battery_received.wait(), timeout=BATTERY_NOTIFICATION_TIMEOUT
-                    )
-                except asyncio.TimeoutError:
-                    _LOGGER.debug("MiVia battery response timed out; keeping last value")
+            # Some firmware drops the first battery query. Retry once, but never
+            # fail the coordinator refresh solely because battery data is absent.
+            if battery_request_sent:
+                for attempt in range(BATTERY_REQUEST_RETRIES + 1):
+                    if battery_received.is_set():
+                        break
+                    if attempt:
+                        _LOGGER.debug(
+                            "MiVia battery response missing; retrying request (%s/%s)",
+                            attempt,
+                            BATTERY_REQUEST_RETRIES,
+                        )
+                        try:
+                            await client.write_gatt_char(
+                                BATTERY_CONTROL_CHARACTERISTIC_UUID,
+                                bytes((OPCODE_GET_DEVICE_INFO, OPCODE_GET_BATTERY_LEVEL)),
+                                response=battery_write_response,
+                            )
+                        except Exception:  # noqa: BLE001
+                            _LOGGER.warning(
+                                "MiVia battery retry write failed",
+                                exc_info=True,
+                            )
+                            break
+                    try:
+                        await asyncio.wait_for(
+                            battery_received.wait(),
+                            timeout=BATTERY_NOTIFICATION_TIMEOUT,
+                        )
+                    except asyncio.TimeoutError:
+                        if attempt == BATTERY_REQUEST_RETRIES:
+                            _LOGGER.warning(
+                                "MiVia battery response timed out after %s request(s)",
+                                attempt + 1,
+                            )
 
             self._last_data.update(packet_data)
             return dict(self._last_data)
