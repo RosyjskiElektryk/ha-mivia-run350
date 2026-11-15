@@ -30,23 +30,68 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# The app's InstantaneousDataVersion0 decoder reads 16 bytes:
+# Mercury uses Garmin FIT field numbers as packet type codes:
+# 0xFD = event packet, 0xFE = response packet.
+MERCURY_EVENT_PACKET = 0xFD
+MERCURY_RESPONSE_PACKET = 0xFE
+MERCURY_RESPONSE_SUCCESS = 0x01
+
+# InstantaneousDataVersion0 reads 16 bytes after skipping one payload byte:
 # distance:u32 BE, steps:u32 BE, active_time:u32 BE,
 # total_calories:u16 BE, active_calories:u16 BE.
 INSTANTANEOUS_V0_LENGTH = 16
 NOTIFICATION_TIMEOUT = 10
 
 
-def parse_notification(data: bytes) -> dict | None:
+def parse_instantaneous_response(data: bytes) -> int | None:
+    """Decode the Mercury response and return its data-structure version."""
+    if (
+        len(data) < 3
+        or data[0] != MERCURY_RESPONSE_PACKET
+        or data[1] != OPCODE_INSTANTANEOUS_DATA
+    ):
+        return None
+
+    response_code = data[2]
+    if response_code != MERCURY_RESPONSE_SUCCESS:
+        _LOGGER.warning(
+            "MiVia instantaneous request failed with response code 0x%02X",
+            response_code,
+        )
+        return None
+
+    if len(data) < 4:
+        _LOGGER.warning(
+            "Short MiVia instantaneous response: %s", data.hex(" ")
+        )
+        return None
+
+    return data[3]
+
+
+def parse_notification(data: bytes, struct_version: int | None) -> dict | None:
     """Decode a Mercury instantaneous-data event."""
-    if len(data) < 3 or data[1] != EVENT_INSTANTANEOUS_DATA:
+    if (
+        len(data) < 3
+        or data[0] != MERCURY_EVENT_PACKET
+        or data[1] != EVENT_INSTANTANEOUS_DATA
+    ):
         return None
 
-    version = data[2]
-    if version != 0:
-        _LOGGER.warning("Unsupported MiVia instantaneous data version: %s", version)
+    if struct_version is None:
+        _LOGGER.debug(
+            "MiVia instantaneous event arrived before a successful version response: %s",
+            data.hex(" "),
+        )
         return None
 
+    if struct_version != 0:
+        _LOGGER.warning(
+            "Unsupported MiVia instantaneous data version: %s", struct_version
+        )
+        return None
+
+    # InstantaneousAssistant.processPacket() skips this first payload byte.
     payload = data[3:]
     if len(payload) < INSTANTANEOUS_V0_LENGTH:
         _LOGGER.debug(
@@ -121,15 +166,28 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
         instantaneous_received = asyncio.Event()
         battery_received = asyncio.Event()
         packet_data: dict = {}
+        instantaneous_struct_version: int | None = None
         battery_notify_started = False
         battery_request_sent = False
         battery_write_response = False
         debug_notify_started: list[str] = []
 
         def instantaneous_handler(_sender, payload: bytearray) -> None:
+            nonlocal instantaneous_struct_version
+
             raw = bytes(payload)
             _LOGGER.debug("MiVia RX instantaneous %s: %s", _sender, raw.hex(" "))
-            parsed = parse_notification(raw)
+
+            response_version = parse_instantaneous_response(raw)
+            if response_version is not None:
+                instantaneous_struct_version = response_version
+                _LOGGER.debug(
+                    "MiVia instantaneous response accepted: struct_version=%s",
+                    response_version,
+                )
+                return
+
+            parsed = parse_notification(raw, instantaneous_struct_version)
             if parsed is not None:
                 packet_data.update(parsed)
                 instantaneous_received.set()
