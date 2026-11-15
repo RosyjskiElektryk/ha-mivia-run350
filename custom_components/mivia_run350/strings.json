@@ -1,0 +1,19 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect MiVia Run 350",
+        "description": "Enter the Bluetooth address of your watch.",
+        "data": {
+          "address": "Bluetooth address"
+        }
+      }
+    },
+    "error": {
+      "invalid_address": "Enter a Bluetooth MAC address in the format AA:BB:CC:DD:EE:FF."
+    },
+    "abort": {
+      "already_configured": "This watch is already configured."
+    }
+  }
+}
