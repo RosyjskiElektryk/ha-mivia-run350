@@ -341,26 +341,6 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                                 exc_info=True,
                             )
 
-            # Mercury.setInstantaneousAvailability(true, ...) sends exactly 40 01.
-            activity_command = bytes((OPCODE_INSTANTANEOUS_DATA, 0x01))
-            _LOGGER.debug(
-                "MiVia TX instantaneous characteristic=%s response=True payload=%s",
-                CONTROL_POINT_CHARACTERISTIC_UUID,
-                activity_command.hex(" "),
-            )
-            await client.write_gatt_char(
-                CONTROL_POINT_CHARACTERISTIC_UUID,
-                activity_command,
-                response=True,
-            )
-
-            await asyncio.wait_for(
-                instantaneous_received.wait(), timeout=NOTIFICATION_TIMEOUT
-            )
-
-            # Request battery only after Mercury has completed its initialization
-            # and delivered instantaneous data. This tests whether the watch's
-            # MiWell battery service needs the Mercury session to be active first.
             # Battery data is optional; a failure must not block activity updates.
             if battery_notify_started and battery_characteristic is not None:
                 try:
@@ -384,6 +364,23 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                         "Could not request MiVia battery data; continuing with activity data",
                         exc_info=True,
                     )
+
+            # Mercury.setInstantaneousAvailability(true, ...) sends exactly 40 01.
+            activity_command = bytes((OPCODE_INSTANTANEOUS_DATA, 0x01))
+            _LOGGER.debug(
+                "MiVia TX instantaneous characteristic=%s response=True payload=%s",
+                CONTROL_POINT_CHARACTERISTIC_UUID,
+                activity_command.hex(" "),
+            )
+            await client.write_gatt_char(
+                CONTROL_POINT_CHARACTERISTIC_UUID,
+                activity_command,
+                response=True,
+            )
+
+            await asyncio.wait_for(
+                instantaneous_received.wait(), timeout=NOTIFICATION_TIMEOUT
+            )
 
             # Some firmware drops the first battery query. Retry once, but never
             # fail the coordinator refresh solely because battery data is absent.
