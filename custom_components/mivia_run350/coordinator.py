@@ -191,10 +191,17 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                             )
 
             # Keep the known protocol characteristics on their dedicated parsers.
-            await client.start_notify(
-                BATTERY_CONTROL_CHARACTERISTIC_UUID, battery_handler
-            )
-            battery_notify_started = True
+            try:
+                await client.start_notify(
+                    BATTERY_CONTROL_CHARACTERISTIC_UUID, battery_handler
+                )
+                battery_notify_started = True
+            except Exception:  # noqa: BLE001
+                _LOGGER.warning(
+                    "Could not subscribe to MiVia battery notifications; "
+                    "continuing with activity data",
+                    exc_info=True,
+                )
 
             await client.start_notify(
                 CONTROL_POINT_CHARACTERISTIC_UUID, instantaneous_handler
