@@ -51,7 +51,7 @@ def parse_notification(data: bytes) -> dict | None:
         _LOGGER.debug(
             "Short MiVia instantaneous packet (%s bytes): %s",
             len(data),
-            data.hex(),
+            data.hex(" "),
         )
         return None
 
@@ -108,23 +108,45 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                 f"MiVia {self.address} not found by the Home Assistant Bluetooth scanner"
             )
 
+        debug_enabled = _LOGGER.isEnabledFor(logging.DEBUG)
+        if debug_enabled:
+            _LOGGER.debug(
+                "MiVia BLE device selected: address=%s name=%s rssi=%s",
+                getattr(device, "address", self.address),
+                getattr(device, "name", None),
+                getattr(device, "rssi", None),
+            )
+
         instantaneous_received = asyncio.Event()
         battery_received = asyncio.Event()
         packet_data: dict = {}
         battery_notify_started = False
         battery_request_sent = False
+        debug_notify_started: list[str] = []
 
         def instantaneous_handler(_sender, payload: bytearray) -> None:
-            parsed = parse_notification(bytes(payload))
+            raw = bytes(payload)
+            _LOGGER.debug("MiVia RX instantaneous %s: %s", _sender, raw.hex(" "))
+            parsed = parse_notification(raw)
             if parsed is not None:
                 packet_data.update(parsed)
                 instantaneous_received.set()
 
         def battery_handler(_sender, payload: bytearray) -> None:
-            parsed = parse_battery_notification(bytes(payload))
+            raw = bytes(payload)
+            _LOGGER.debug("MiVia RX battery %s: %s", _sender, raw.hex(" "))
+            parsed = parse_battery_notification(raw)
             if parsed is not None:
+                _LOGGER.debug("MiVia battery parsed: %s", parsed)
                 packet_data.update(parsed)
                 battery_received.set()
+
+        def generic_notification_handler(_sender, payload: bytearray) -> None:
+            _LOGGER.debug(
+                "MiVia RX GATT notification sender=%s payload=%s",
+                _sender,
+                bytes(payload).hex(" "),
+            )
 
         client = None
         try:
@@ -137,16 +159,97 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                 timeout=60,
             )
 
-            # Battery data uses a separate proprietary MiWell characteristic.
-            # It is optional: failure must not prevent steps/calories updates.
-            try:
-                await client.start_notify(
-                    BATTERY_CONTROL_CHARACTERISTIC_UUID, battery_handler
+            if debug_enabled:
+                _LOGGER.debug(
+                    "MiVia BLE connected: address=%s mtu=%s",
+                    self.address,
+                    getattr(client, "mtu_size", None),
                 )
-                battery_notify_started = True
+                # Dump the complete GATT database discovered by Bleak.
+                for service in client.services:
+                    _LOGGER.debug(
+                        "MiVia GATT service: uuid=%s handle=%s",
+                        service.uuid,
+                        service.handle,
+                    )
+                    for characteristic in service.characteristics:
+                        _LOGGER.debug(
+                            "MiVia GATT characteristic: service=%s uuid=%s "
+                            "handle=%s properties=%s",
+                            service.uuid,
+                            characteristic.uuid,
+                            characteristic.handle,
+                            characteristic.properties,
+                        )
+                        for descriptor in characteristic.descriptors:
+                            _LOGGER.debug(
+                                "MiVia GATT descriptor: characteristic=%s "
+                                "uuid=%s handle=%s",
+                                characteristic.uuid,
+                                descriptor.uuid,
+                                descriptor.handle,
+                            )
+
+            # Keep the known protocol characteristics on their dedicated parsers.
+            await client.start_notify(
+                BATTERY_CONTROL_CHARACTERISTIC_UUID, battery_handler
+            )
+            battery_notify_started = True
+
+            await client.start_notify(
+                CONTROL_POINT_CHARACTERISTIC_UUID, instantaneous_handler
+            )
+
+            # In DEBUG mode, also subscribe to every other notify/indicate
+            # characteristic so that unsolicited watch data can be inspected.
+            # This is diagnostic only; normal operation does not subscribe to
+            # unrelated characteristics.
+            if debug_enabled:
+                known_characteristics = {
+                    BATTERY_CONTROL_CHARACTERISTIC_UUID.lower(),
+                    CONTROL_POINT_CHARACTERISTIC_UUID.lower(),
+                }
+                for service in client.services:
+                    for characteristic in service.characteristics:
+                        uuid = characteristic.uuid.lower()
+                        properties = {
+                            prop.lower() for prop in characteristic.properties
+                        }
+                        if (
+                            uuid in known_characteristics
+                            or not properties.intersection({"notify", "indicate"})
+                        ):
+                            continue
+                        try:
+                            await client.start_notify(
+                                characteristic.uuid, generic_notification_handler
+                            )
+                            debug_notify_started.append(characteristic.uuid)
+                            _LOGGER.debug(
+                                "MiVia diagnostic subscription started: %s",
+                                characteristic.uuid,
+                            )
+                        except Exception:  # noqa: BLE001
+                            _LOGGER.debug(
+                                "MiVia diagnostic subscription failed: %s",
+                                characteristic.uuid,
+                                exc_info=True,
+                            )
+
+            # Battery data uses a proprietary MiWell characteristic.
+            # It is optional: failure must not prevent activity-data updates.
+            try:
+                battery_command = bytes(
+                    (OPCODE_GET_DEVICE_INFO, OPCODE_GET_BATTERY_LEVEL)
+                )
+                _LOGGER.debug(
+                    "MiVia TX battery characteristic=%s response=True payload=%s",
+                    BATTERY_CONTROL_CHARACTERISTIC_UUID,
+                    battery_command.hex(" "),
+                )
                 await client.write_gatt_char(
                     BATTERY_CONTROL_CHARACTERISTIC_UUID,
-                    bytes((OPCODE_GET_DEVICE_INFO, OPCODE_GET_BATTERY_LEVEL)),
+                    battery_command,
                     response=True,
                 )
                 battery_request_sent = True
@@ -156,13 +259,16 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                     exc_info=True,
                 )
 
-            await client.start_notify(
-                CONTROL_POINT_CHARACTERISTIC_UUID, instantaneous_handler
-            )
             # Mercury.setInstantaneousAvailability(true, ...) sends exactly 40 01.
+            activity_command = bytes((OPCODE_INSTANTANEOUS_DATA, 0x01))
+            _LOGGER.debug(
+                "MiVia TX instantaneous characteristic=%s response=True payload=%s",
+                CONTROL_POINT_CHARACTERISTIC_UUID,
+                activity_command.hex(" "),
+            )
             await client.write_gatt_char(
                 CONTROL_POINT_CHARACTERISTIC_UUID,
-                bytes((OPCODE_INSTANTANEOUS_DATA, 0x01)),
+                activity_command,
                 response=True,
             )
 
@@ -196,17 +302,19 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
             raise UpdateFailed(f"MiVia BLE communication failed: {err}") from err
         finally:
             if client is not None and client.is_connected:
-                for characteristic, started in (
-                    (CONTROL_POINT_CHARACTERISTIC_UUID, True),
-                    (BATTERY_CONTROL_CHARACTERISTIC_UUID, battery_notify_started),
+                for characteristic in (
+                    CONTROL_POINT_CHARACTERISTIC_UUID,
+                    BATTERY_CONTROL_CHARACTERISTIC_UUID,
+                    *debug_notify_started,
                 ):
-                    if started:
-                        try:
-                            await client.stop_notify(characteristic)
-                        except Exception:  # noqa: BLE001
-                            _LOGGER.debug(
-                                "Could not stop MiVia notifications for %s",
-                                characteristic,
-                                exc_info=True,
-                            )
+                    try:
+                        await client.stop_notify(characteristic)
+                    except Exception:  # noqa: BLE001
+                        _LOGGER.debug(
+                            "Could not stop MiVia notifications for %s",
+                            characteristic,
+                            exc_info=True,
+                        )
                 await client.disconnect()
+                if debug_enabled:
+                    _LOGGER.debug("MiVia BLE disconnected: address=%s", self.address)
