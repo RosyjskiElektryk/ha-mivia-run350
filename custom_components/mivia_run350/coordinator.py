@@ -176,10 +176,21 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
         battery_write_response = False
         diagnostic_notify_started: list[str] = []
 
+        def record_diagnostic_packet(channel: str, raw: bytes) -> None:
+            """Store packet count, payload and timestamp for a GATT channel."""
+            prefix = f"diag_{channel}"
+            count_key = f"{prefix}_count"
+            packet_data[count_key] = packet_data.get(
+                count_key, self._last_data.get(count_key, 0)
+            ) + 1
+            packet_data[f"{prefix}_last_packet"] = raw.hex(" ")
+            packet_data[f"{prefix}_last_seen"] = datetime.now(timezone.utc)
+
         def instantaneous_handler(_sender, payload: bytearray) -> None:
             nonlocal instantaneous_struct_version
 
             raw = bytes(payload)
+            record_diagnostic_packet("1011", raw)
             _LOGGER.debug("MiVia RX instantaneous %s: %s", _sender, raw.hex(" "))
 
             response_version = parse_instantaneous_response(raw)
@@ -198,6 +209,7 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
 
         def battery_handler(_sender, payload: bytearray) -> None:
             raw = bytes(payload)
+            record_diagnostic_packet("e00a", raw)
             _LOGGER.debug("MiVia RX battery %s: %s", _sender, raw.hex(" "))
             parsed = parse_battery_notification(raw)
             if parsed is not None:
@@ -213,11 +225,7 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
             """Create a handler that records raw packets from one GATT channel."""
             def handler(_sender, payload: bytearray) -> None:
                 raw = bytes(payload)
-                prefix = f"diag_{channel}"
-                count_key = f"{prefix}_count"
-                packet_data[count_key] = self._last_data.get(count_key, 0) + 1
-                packet_data[f"{prefix}_last_packet"] = raw.hex(" ")
-                packet_data[f"{prefix}_last_seen"] = datetime.now(timezone.utc)
+                record_diagnostic_packet(channel, raw)
                 _LOGGER.debug(
                     "MiVia RX diagnostic channel=%s sender=%s payload=%s",
                     channel,
