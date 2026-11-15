@@ -7,6 +7,7 @@ Experimental custom integration for reading data from the **MiVia Run 350** over
 ## Current scope
 
 - Connect to the watch using its Bluetooth address.
+- Attempt BLE pairing/bonding before connecting. If the watch requires a passkey, the Bluetooth host must be able to handle the pairing prompt; this integration does not guess or hardcode a PIN.
 - Subscribe to the Mercury control-point notification characteristic.
 - Send the documented-by-observation instantaneous-data enable command `40 01`.
 - Decode version-0 instantaneous packets and expose the step count.
@@ -20,6 +21,7 @@ The version-0 payload is decoded as big-endian fields: distance (u32), steps (u3
 3. Open **Settings → Devices & services → Add integration**.
 4. Search for **MiVia Run 350** and enter the watch's Bluetooth address.
 5. Keep the watch close to a Home Assistant Bluetooth adapter or Bluetooth proxy.
+6. On first connection, allow up to 60 seconds for BLE pairing. If the watch asks for a passkey, enter the code requested by the watch/operating system. No default PIN is assumed.
 
 The watch must be available to Home Assistant's Bluetooth scanner. Close the vendor phone app while testing because it may hold the BLE connection.
 
