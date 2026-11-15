@@ -257,7 +257,7 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                 await client.write_gatt_char(
                     BATTERY_CONTROL_CHARACTERISTIC_UUID,
                     battery_command,
-                    response=True,
+                    response=False,
                 )
                 battery_request_sent = True
             except Exception:  # noqa: BLE001
