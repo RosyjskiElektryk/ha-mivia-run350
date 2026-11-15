@@ -25,6 +25,8 @@ BATTERY_REQUEST_RETRIES = 1
 # Additional notify/indicate characteristics discovered on the watch.
 # These are monitored passively; no undocumented commands are sent to them.
 DIAGNOSTIC_CHANNELS = {
+    "e00a": "0a0ae00a-0a00-1000-8000-00805f9b34fb",
+    "1011": "0a0a1011-0a00-1000-8000-00805f9b34fb",
     "e00f": "0a0ae00f-0a00-1000-8000-00805f9b34fb",
     "e010": "0a0ae010-0a00-1000-8000-00805f9b34fb",
     "e011": "0a0ae011-0a00-1000-8000-00805f9b34fb",
