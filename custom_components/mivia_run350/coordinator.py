@@ -98,6 +98,8 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                 device,
                 "MiVia Run 350",
                 max_attempts=3,
+                pair=True,
+                timeout=60,
             )
             await client.start_notify(
                 CONTROL_POINT_CHARACTERISTIC_UUID, notification_handler
