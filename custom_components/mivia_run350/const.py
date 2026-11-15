@@ -14,6 +14,7 @@ BATTERY_CONTROL_CHARACTERISTIC_UUID = "0a0ae00a-0a00-1000-8000-00805f9b34fb"
 # protocol classes. 0x40 enables instantaneous data; 0x71 carries that data.
 OPCODE_INSTANTANEOUS_DATA = 0x40
 EVENT_INSTANTANEOUS_DATA = 0x71
+EVENT_ACTIVITY_DATA_CHANGED = 0x72
 
 # Proprietary MiWell battery request/response: [0x0F, 0x17].
 OPCODE_GET_DEVICE_INFO = 0x0F
