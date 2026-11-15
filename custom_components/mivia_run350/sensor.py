@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
-from homeassistant.const import PERCENTAGE
+from homeassistant.const import EntityCategory, PERCENTAGE
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
@@ -18,7 +18,15 @@ async def async_setup_entry(hass, entry, async_add_entities) -> None:
             MiViaStepsSensor(coordinator, entry),
             MiViaCaloriesSensor(coordinator, entry),
             MiViaActiveCaloriesSensor(coordinator, entry),
+            MiViaDistanceRawSensor(coordinator, entry),
+            MiViaActiveTimeRawSensor(coordinator, entry),
             MiViaBatterySensor(coordinator, entry),
+            MiViaRssiSensor(coordinator, entry),
+            *[
+                MiViaDiagnosticSensor(coordinator, entry, channel, metric)
+                for channel in ("e00f", "e010", "e011", "1012")
+                for metric in ("count", "last_packet", "last_seen")
+            ],
         ]
     )
 
@@ -107,3 +115,70 @@ class MiViaBatterySensor(MiViaBaseSensor):
         super().__init__(
             coordinator, entry, "battery", "Battery", "mdi:battery", PERCENTAGE
         )
+
+
+
+class MiViaDistanceRawSensor(MiViaBaseSensor):
+    """Raw distance field; unit conversion is not confirmed yet."""
+
+    _attr_state_class = "measurement"
+
+    def __init__(self, coordinator: MiViaCoordinator, entry) -> None:
+        super().__init__(
+            coordinator, entry, "distance_raw", "Distance (raw)", "mdi:map-marker-distance"
+        )
+
+
+class MiViaActiveTimeRawSensor(MiViaBaseSensor):
+    """Raw active-time field; unit conversion is not confirmed yet."""
+
+    _attr_state_class = "measurement"
+
+    def __init__(self, coordinator: MiViaCoordinator, entry) -> None:
+        super().__init__(
+            coordinator, entry, "active_time_raw", "Active time (raw)", "mdi:timer-outline"
+        )
+
+
+class MiViaRssiSensor(MiViaBaseSensor):
+    """RSSI from the latest Bluetooth advertisement received by Home Assistant."""
+
+    _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
+    _attr_native_unit_of_measurement = "dBm"
+    _attr_state_class = "measurement"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: MiViaCoordinator, entry) -> None:
+        super().__init__(coordinator, entry, "rssi", "Bluetooth signal", "mdi:bluetooth")
+
+
+class MiViaDiagnosticSensor(MiViaBaseSensor):
+    """Raw diagnostics for an additional GATT notification channel."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self, coordinator: MiViaCoordinator, entry, channel: str, metric: str
+    ) -> None:
+        names = {
+            "count": "packets",
+            "last_packet": "last packet",
+            "last_seen": "last seen",
+        }
+        icons = {
+            "count": "mdi:counter",
+            "last_packet": "mdi:code-braces",
+            "last_seen": "mdi:clock-outline",
+        }
+        key = f"diag_{channel}_{metric}"
+        super().__init__(
+            coordinator,
+            entry,
+            key,
+            f"BLE {channel.upper()} {names[metric]}",
+            icons[metric],
+        )
+        if metric == "count":
+            self._attr_state_class = "total_increasing"
+        elif metric == "last_seen":
+            self._attr_device_class = SensorDeviceClass.TIMESTAMP
