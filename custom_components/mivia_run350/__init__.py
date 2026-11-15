@@ -16,12 +16,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up MiVia from a config entry."""
     coordinator = MiViaCoordinator(hass, entry)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
-    try:
-        await coordinator.async_config_entry_first_refresh()
-        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    except Exception:
-        coordinator.async_shutdown()
-        raise
+    await coordinator.async_config_entry_first_refresh()
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
@@ -29,6 +25,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        coordinator: MiViaCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
-        coordinator.async_shutdown()
+        hass.data[DOMAIN].pop(entry.entry_id)
     return unload_ok
