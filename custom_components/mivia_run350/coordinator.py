@@ -293,9 +293,9 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                 BleakClient,
                 device,
                 "MiVia Run 350",
-                max_attempts=3,
-                pair=True,
-                timeout=60,
+                max_attempts=5,
+                pair=False,
+                timeout=120,
             )
 
             if debug_enabled:
