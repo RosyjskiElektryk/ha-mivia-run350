@@ -528,6 +528,26 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                             exc_info=True,
                         )
 
+            # Mercury.setInstantaneousAvailability(true, ...) sends exactly 40 01.
+            set_stage("request_instantaneous")
+            activity_command = bytes((OPCODE_INSTANTANEOUS_DATA, 0x01))
+            record_tx("1011", activity_command)
+            _LOGGER.debug(
+                "MiVia TX instantaneous characteristic=%s response=True payload=%s",
+                CONTROL_POINT_CHARACTERISTIC_UUID,
+                activity_command.hex(" "),
+            )
+            await client.write_gatt_char(
+                CONTROL_POINT_CHARACTERISTIC_UUID,
+                activity_command,
+                response=True,
+            )
+
+            set_stage("wait_instantaneous")
+            await asyncio.wait_for(
+                instantaneous_received.wait(), timeout=NOTIFICATION_TIMEOUT
+            )
+
             # Battery data is optional; a failure must not block activity updates.
             set_stage("request_battery")
             if (
@@ -565,25 +585,6 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                         exc_info=True,
                     )
 
-            # Mercury.setInstantaneousAvailability(true, ...) sends exactly 40 01.
-            set_stage("request_instantaneous")
-            activity_command = bytes((OPCODE_INSTANTANEOUS_DATA, 0x01))
-            record_tx("1011", activity_command)
-            _LOGGER.debug(
-                "MiVia TX instantaneous characteristic=%s response=True payload=%s",
-                CONTROL_POINT_CHARACTERISTIC_UUID,
-                activity_command.hex(" "),
-            )
-            await client.write_gatt_char(
-                CONTROL_POINT_CHARACTERISTIC_UUID,
-                activity_command,
-                response=True,
-            )
-
-            set_stage("wait_instantaneous")
-            await asyncio.wait_for(
-                instantaneous_received.wait(), timeout=NOTIFICATION_TIMEOUT
-            )
 
             # Some firmware drops the first battery query. Retry once, but never
             # fail the coordinator refresh solely because battery data is absent.
