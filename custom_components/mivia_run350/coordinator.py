@@ -349,26 +349,38 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                 device_info_status = {}
                 if device_info_service is not None:
                     for key, char_uuid in DEVICE_INFO_CHARACTERISTICS.items():
-                    characteristic = next(
-                        (char for char in device_info_service.characteristics
-                         if char.uuid.lower() == char_uuid.lower()),
-                        None,
-                    )
+                        characteristic = next(
+                            (
+                                char
+                                for char in device_info_service.characteristics
+                                if char.uuid.lower() == char_uuid.lower()
+                            ),
+                            None,
+                        )
                         if characteristic is None:
                             device_info_status[key] = "not_present"
                             continue
-                        if "read" not in {prop.lower() for prop in characteristic.properties}:
+                        if "read" not in {
+                            prop.lower() for prop in characteristic.properties
+                        }:
                             device_info_status[key] = "not_readable"
                             continue
                         try:
                             raw_value = bytes(await client.read_gatt_char(char_uuid))
-                            value = raw_value.decode("utf-8", errors="replace").replace(chr(0), "").strip()
+                            value = (
+                                raw_value.decode("utf-8", errors="replace")
+                                .replace(chr(0), "")
+                                .strip()
+                            )
                             packet_data[key] = value or raw_value.hex(" ")
                             device_info_status[key] = "read"
                         except Exception as err:  # noqa: BLE001
-                            device_info_status[key] = f"read_failed: {type(err).__name__}"
+                            device_info_status[key] = (
+                                f"read_failed: {type(err).__name__}"
+                            )
                             _LOGGER.debug(
-                                "MiVia Device Information read failed for %s", char_uuid,
+                                "MiVia Device Information read failed for %s",
+                                char_uuid,
                                 exc_info=True,
                             )
                 packet_data["device_info_read_status"] = device_info_status
