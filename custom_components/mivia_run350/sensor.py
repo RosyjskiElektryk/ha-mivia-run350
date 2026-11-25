@@ -42,6 +42,11 @@ async def async_setup_entry(hass, entry, async_add_entities) -> None:
                     ("tx_last_seen", "Last TX time", "mdi:clock-outline"),
                     ("last_success", "Last successful update", "mdi:check-circle-outline"),
                     ("connection_duration", "Last connection duration", "mdi:timer-outline"),
+                    ("battery_characteristic_properties", "Battery GATT properties", "mdi:bluetooth-settings"),
+                    ("battery_write_mode", "Battery write mode", "mdi:upload"),
+                    ("battery_notify_started", "Battery notifications enabled", "mdi:bell-check"),
+                    ("battery_request_sent", "Battery request sent", "mdi:send"),
+                    ("battery_response_received", "Battery response received", "mdi:battery-check"),
                 )
             ],
         ]
