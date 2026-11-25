@@ -15,6 +15,8 @@ Experimental custom integration for reading data from the **MiVia Run 350** over
 - Expose RSSI when it is available from Home Assistant's Bluetooth scanner.
 - Expose experimental BLE diagnostics for notification traffic and connection state.
 - Subscribe to the proprietary MiWell control characteristic and request battery data with `0F 17`.
+- Verify that the battery characteristic belongs to the expected MiWell service and advertises notify/indicate before subscribing.
+- Expose separate diagnostics for service discovery, notification capability, and subscription success.
 - Select the battery write mode from the characteristic's advertised GATT properties.
 - Retry a missing battery request once; missing battery data does not block activity updates.
 - Expose battery percentage and charging state when the watch returns a valid battery response.

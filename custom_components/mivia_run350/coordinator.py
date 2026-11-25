@@ -16,6 +16,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .const import (
     BATTERY_CONTROL_CHARACTERISTIC_UUID,
+    BATTERY_SERVICE_UUID,
     BATTERY_NOTIFICATION_TIMEOUT,
     BATTERY_REQUEST_RETRIES,
     BATTERY_RESPONSE_LENGTH,
@@ -313,15 +314,27 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
 
             # The companion app sends 0F 17 to this exact MiWell characteristic.
             # Select the GATT write mode from the properties reported by the watch.
-            battery_characteristic = next(
+            battery_service = next(
                 (
-                    characteristic
+                    service
                     for service in client.services
-                    for characteristic in service.characteristics
-                    if characteristic.uuid.lower()
-                    == BATTERY_CONTROL_CHARACTERISTIC_UUID.lower()
+                    if service.uuid.lower() == BATTERY_SERVICE_UUID.lower()
                 ),
                 None,
+            )
+            packet_data["battery_service_found"] = battery_service is not None
+            battery_characteristic = (
+                next(
+                    (
+                        characteristic
+                        for characteristic in battery_service.characteristics
+                        if characteristic.uuid.lower()
+                        == BATTERY_CONTROL_CHARACTERISTIC_UUID.lower()
+                    ),
+                    None,
+                )
+                if battery_service is not None
+                else None
             )
             if battery_characteristic is not None:
                 battery_properties = {
@@ -352,25 +365,39 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                     BATTERY_CONTROL_CHARACTERISTIC_UUID,
                 )
 
+            packet_data["battery_notify_supported"] = (
+                battery_characteristic is not None
+                and bool(
+                    {"notify", "indicate"}.intersection(
+                        prop.lower() for prop in battery_characteristic.properties
+                    )
+                )
+            )
             packet_data["battery_notify_started"] = False
             packet_data["battery_request_sent"] = False
             packet_data["battery_response_received"] = False
             set_stage("subscribe_battery")
-            try:
-                await client.start_notify(
-                    BATTERY_CONTROL_CHARACTERISTIC_UUID, battery_handler
-                )
-                battery_notify_started = True
-                packet_data["battery_notify_started"] = True
-                _LOGGER.debug(
-                    "MiVia battery notifications enabled on %s",
-                    BATTERY_CONTROL_CHARACTERISTIC_UUID,
-                )
-            except Exception:  # noqa: BLE001
+            if packet_data["battery_notify_supported"]:
+                try:
+                    await client.start_notify(
+                        BATTERY_CONTROL_CHARACTERISTIC_UUID, battery_handler
+                    )
+                    battery_notify_started = True
+                    packet_data["battery_notify_started"] = True
+                    _LOGGER.debug(
+                        "MiVia battery notifications enabled on %s",
+                        BATTERY_CONTROL_CHARACTERISTIC_UUID,
+                    )
+                except Exception:  # noqa: BLE001
+                    _LOGGER.warning(
+                        "Could not subscribe to MiVia battery notifications; "
+                        "continuing with activity data",
+                        exc_info=True,
+                    )
+            else:
                 _LOGGER.warning(
-                    "Could not subscribe to MiVia battery notifications; "
-                    "continuing with activity data",
-                    exc_info=True,
+                    "MiVia battery characteristic does not advertise notify/indicate; "
+                    "battery polling is disabled"
                 )
 
             set_stage("subscribe_mercury")
