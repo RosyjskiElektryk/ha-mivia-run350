@@ -37,7 +37,7 @@ The watch must be available to Home Assistant's Bluetooth scanner. Close the ven
 ## Known limitations
 
 - The integration opens a BLE connection for each refresh and requests instantaneous and battery data. This is intentionally simple for initial protocol validation, not optimized for battery life.
-- A fresh instantaneous notification is expected within 10 seconds. If no packet arrives, initial setup will fail with a diagnostic message.
+- A fresh instantaneous notification is expected within 10 seconds. If the watch is unavailable during startup, the integration remains loaded and retries on its normal coordinator interval; sensor values remain unavailable until the first successful read.
 - Battery polling is optional and has a separate response timeout. One retry is attempted; a missing battery response does not prevent steps/calories updates and the last known battery value is retained.
 - Only Mercury protocol structure version 0 is decoded.
 - Heart-rate events and historical activity/sleep data are not implemented yet.
@@ -77,7 +77,7 @@ logger:
     bleak: debug
 ```
 
-Restart Home Assistant and inspect the logs if setup fails. Battery diagnostics include the discovered write properties, subscription result, raw notifications, and retry outcome.
+Restart Home Assistant and inspect the logs if setup fails. Battery diagnostics include the discovered GATT write properties, selected write mode, notification-subscription result, whether the request was sent, whether a valid response was received, raw notifications, and retry outcome. The integration also exposes these battery transport details as diagnostic entities.
 
 ## License
 
