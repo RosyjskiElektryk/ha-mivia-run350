@@ -17,6 +17,8 @@ Experimental custom integration for reading data from the **MiVia Run 350** over
 - Subscribe to the proprietary MiWell control characteristic and request battery data with `0F 17`.
 - Verify that the battery characteristic belongs to the expected MiWell service and advertises notify/indicate before subscribing.
 - Expose separate diagnostics for service discovery, notification capability, and subscription success.
+- Read the standard Bluetooth Device Information Service when available (firmware, software, hardware, model, and manufacturer revisions).
+- Expose the discovered GATT service/characteristic/descriptor inventory and additional battery write/CCCD diagnostics.
 - Select the battery write mode from the characteristic's advertised GATT properties.
 - Retry a missing battery request once; missing battery data does not block activity updates.
 - Expose battery percentage and charging state when the watch returns a valid battery response.
