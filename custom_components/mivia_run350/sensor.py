@@ -42,7 +42,6 @@ async def async_setup_entry(hass, entry, async_add_entities) -> None:
                 MiViaSystemDiagnosticSensor(coordinator, entry, key, name, icon)
                 for key, name, icon in (
                     ("ble_mtu", "BLE MTU", "mdi:arrow-left-right"),
-                    ("gatt_service_count", "GATT service count", "mdi:format-list-numbered"),
                     ("device_info_service_found", "Device Information service found", "mdi:bluetooth-settings"),
                     ("battery_characteristic_handle", "Battery characteristic handle", "mdi:identifier"),
                     ("battery_cccd_found", "Battery CCCD found", "mdi:bell-check"),
@@ -206,7 +205,14 @@ class MiViaGattInventorySensor(MiViaBaseSensor):
     @property
     def extra_state_attributes(self):
         """Expose service, characteristic, property and descriptor metadata."""
-        return {"services": self.coordinator.data.get("gatt_inventory", [])}
+        return {
+            "services": self.coordinator.data.get("gatt_inventory", []),
+            "device_info_read_status": self.coordinator.data.get("device_info_read_status", {}),
+            "battery_write_mode": self.coordinator.data.get("battery_write_mode"),
+            "battery_characteristic_properties": self.coordinator.data.get(
+                "battery_characteristic_properties"
+            ),
+        }
 
 
 class MiViaDiagnosticSensor(MiViaBaseSensor):
