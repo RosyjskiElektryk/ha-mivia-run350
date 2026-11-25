@@ -337,7 +337,6 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                     packet_data["battery_write_mode"] = "with_response"
                 else:
                     packet_data["battery_write_mode"] = "unsupported"
-                else:
                     _LOGGER.warning(
                         "MiVia battery characteristic has no supported write property: %s",
                         sorted(battery_properties),
