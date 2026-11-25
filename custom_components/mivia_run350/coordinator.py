@@ -204,6 +204,7 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
         battery_notify_started = False
         battery_request_sent = False
         battery_write_response = False
+        battery_write_supported = False
         diagnostic_notify_started: list[str] = []
 
         def record_diagnostic_packet(channel: str, raw: bytes) -> None:
@@ -330,9 +331,11 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                     sorted(battery_properties)
                 )
                 if "write-without-response" in battery_properties:
+                    battery_write_supported = True
                     battery_write_response = False
                     packet_data["battery_write_mode"] = "without_response"
                 elif "write" in battery_properties:
+                    battery_write_supported = True
                     battery_write_response = True
                     packet_data["battery_write_mode"] = "with_response"
                 else:
@@ -415,7 +418,11 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
 
             # Battery data is optional; a failure must not block activity updates.
             set_stage("request_battery")
-            if battery_notify_started and battery_characteristic is not None:
+            if (
+                battery_notify_started
+                and battery_characteristic is not None
+                and battery_write_supported
+            ):
                 try:
                     battery_command = bytes(
                         (OPCODE_GET_DEVICE_INFO, OPCODE_GET_BATTERY_LEVEL)
