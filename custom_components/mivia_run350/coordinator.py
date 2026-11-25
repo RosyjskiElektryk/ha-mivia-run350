@@ -23,6 +23,8 @@ from .const import (
     CONF_ADDRESS,
     CONTROL_POINT_CHARACTERISTIC_UUID,
     DOMAIN,
+    DEVICE_INFO_CHARACTERISTICS,
+    DEVICE_INFO_SERVICE_UUID,
     DIAGNOSTIC_CHANNELS,
     EVENT_INSTANTANEOUS_DATA,
     OPCODE_GET_BATTERY_LEVEL,
@@ -242,6 +244,7 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
 
         def battery_handler(_sender, payload: bytearray) -> None:
             raw = bytes(payload)
+            packet_data["battery_raw_response"] = raw.hex(" ")
             record_diagnostic_packet("e00a", raw)
             _LOGGER.debug("MiVia RX battery %s: %s", _sender, raw.hex(" "))
             parsed = parse_battery_notification(raw)
@@ -280,6 +283,7 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
             )
 
             packet_data["connection_state"] = "connected"
+            packet_data["ble_mtu"] = getattr(client, "mtu_size", None)
             set_stage("gatt_discovery")
             if debug_enabled:
                 _LOGGER.debug(
@@ -312,6 +316,62 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                                 descriptor.handle,
                             )
 
+            # Store the complete discovered GATT database as passive diagnostics.
+            gatt_inventory = []
+            for service in client.services:
+                service_info = {
+                    "uuid": service.uuid,
+                    "handle": service.handle,
+                    "characteristics": [],
+                }
+                for characteristic in service.characteristics:
+                    service_info["characteristics"].append({
+                        "uuid": characteristic.uuid,
+                        "handle": characteristic.handle,
+                        "properties": list(characteristic.properties),
+                        "descriptors": [
+                            {"uuid": descriptor.uuid, "handle": descriptor.handle}
+                            for descriptor in characteristic.descriptors
+                        ],
+                    })
+                gatt_inventory.append(service_info)
+            packet_data["gatt_inventory"] = gatt_inventory
+            packet_data["gatt_service_count"] = len(gatt_inventory)
+
+            # Read only standard Device Information characteristics when exposed.
+            device_info_service = next(
+                (service for service in client.services
+                 if service.uuid.lower() == DEVICE_INFO_SERVICE_UUID.lower()),
+                None,
+            )
+            packet_data["device_info_service_found"] = device_info_service is not None
+            device_info_status = {}
+            if device_info_service is not None:
+                for key, char_uuid in DEVICE_INFO_CHARACTERISTICS.items():
+                    characteristic = next(
+                        (char for char in device_info_service.characteristics
+                         if char.uuid.lower() == char_uuid.lower()),
+                        None,
+                    )
+                    if characteristic is None:
+                        device_info_status[key] = "not_present"
+                        continue
+                    if "read" not in {prop.lower() for prop in characteristic.properties}:
+                        device_info_status[key] = "not_readable"
+                        continue
+                    try:
+                        raw_value = bytes(await client.read_gatt_char(char_uuid))
+                        value = raw_value.decode("utf-8", errors="replace").replace(chr(0), "").strip()
+                        packet_data[key] = value or raw_value.hex(" ")
+                        device_info_status[key] = "read"
+                    except Exception as err:  # noqa: BLE001
+                        device_info_status[key] = f"read_failed: {type(err).__name__}"
+                        _LOGGER.debug(
+                            "MiVia Device Information read failed for %s", char_uuid,
+                            exc_info=True,
+                        )
+            packet_data["device_info_read_status"] = device_info_status
+
             # The companion app sends 0F 17 to this exact MiWell characteristic.
             # Select the GATT write mode from the properties reported by the watch.
             battery_service = next(
@@ -336,6 +396,16 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                 if battery_service is not None
                 else None
             )
+            packet_data["battery_characteristic_handle"] = (
+                battery_characteristic.handle if battery_characteristic is not None else None
+            )
+            battery_cccd = (
+                next((descriptor for descriptor in battery_characteristic.descriptors
+                      if descriptor.uuid.lower() == "00002902-0000-1000-8000-00805f9b34fb"), None)
+                if battery_characteristic is not None else None
+            )
+            packet_data["battery_cccd_found"] = battery_cccd is not None
+            packet_data["battery_cccd_handle"] = battery_cccd.handle if battery_cccd else None
             if battery_characteristic is not None:
                 battery_properties = {
                     prop.lower() for prop in battery_characteristic.properties
@@ -375,6 +445,8 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
             )
             packet_data["battery_notify_started"] = False
             packet_data["battery_request_sent"] = False
+            packet_data["battery_write_attempted"] = False
+            packet_data["battery_raw_response"] = None
             packet_data["battery_response_received"] = False
             set_stage("subscribe_battery")
             if packet_data["battery_notify_supported"]:
@@ -461,6 +533,7 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                         battery_command.hex(" "),
                     )
                     record_tx("e00a", battery_command)
+                    packet_data["battery_write_attempted"] = True
                     await client.write_gatt_char(
                         BATTERY_CONTROL_CHARACTERISTIC_UUID,
                         battery_command,
@@ -517,6 +590,7 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                                 (OPCODE_GET_DEVICE_INFO, OPCODE_GET_BATTERY_LEVEL)
                             )
                             record_tx("e00a", retry_command)
+                            packet_data["battery_write_attempted"] = True
                             await client.write_gatt_char(
                                 BATTERY_CONTROL_CHARACTERISTIC_UUID,
                                 retry_command,
