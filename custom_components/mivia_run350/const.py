@@ -10,6 +10,16 @@ CONTROL_POINT_CHARACTERISTIC_UUID = "0a0a1011-0a00-1000-8000-00805f9b34fb"
 BATTERY_SERVICE_UUID = "0a0aee03-0a00-1000-8000-00805f9b34fb"
 BATTERY_CONTROL_CHARACTERISTIC_UUID = "0a0ae00a-0a00-1000-8000-00805f9b34fb"
 
+# Standard Bluetooth Device Information Service (read-only characteristics).
+DEVICE_INFO_SERVICE_UUID = "0000180a-0000-1000-8000-00805f9b34fb"
+DEVICE_INFO_CHARACTERISTICS = {
+    "firmware_revision": "00002a26-0000-1000-8000-00805f9b34fb",
+    "software_revision": "00002a28-0000-1000-8000-00805f9b34fb",
+    "hardware_revision": "00002a27-0000-1000-8000-00805f9b34fb",
+    "model_number": "00002a24-0000-1000-8000-00805f9b34fb",
+    "manufacturer_name": "00002a29-0000-1000-8000-00805f9b34fb",
+}
+
 # Mercury protocol opcodes/events confirmed from the companion application's
 # protocol classes. 0x40 enables instantaneous data; 0x71 carries that data.
 OPCODE_INSTANTANEOUS_DATA = 0x40
