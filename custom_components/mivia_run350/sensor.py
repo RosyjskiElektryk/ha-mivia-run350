@@ -22,6 +22,17 @@ async def async_setup_entry(hass, entry, async_add_entities) -> None:
             MiViaActiveTimeRawSensor(coordinator, entry),
             MiViaBatterySensor(coordinator, entry),
             MiViaRssiSensor(coordinator, entry),
+            MiViaGattInventorySensor(coordinator, entry),
+            *[
+                MiViaSystemDiagnosticSensor(coordinator, entry, key, name, icon)
+                for key, name, icon in (
+                    ("firmware_revision", "Firmware revision", "mdi:chip"),
+                    ("software_revision", "Software revision", "mdi:code-tags"),
+                    ("hardware_revision", "Hardware revision", "mdi:memory"),
+                    ("model_number", "BLE model number", "mdi:watch"),
+                    ("manufacturer_name", "BLE manufacturer", "mdi:factory"),
+                )
+            ],
             *[
                 MiViaDiagnosticSensor(coordinator, entry, channel, metric)
                 for channel in ("e00a", "1011", "e00f", "e010", "e011", "1012")
@@ -30,6 +41,14 @@ async def async_setup_entry(hass, entry, async_add_entities) -> None:
             *[
                 MiViaSystemDiagnosticSensor(coordinator, entry, key, name, icon)
                 for key, name, icon in (
+                    ("ble_mtu", "BLE MTU", "mdi:arrow-left-right"),
+                    ("gatt_service_count", "GATT service count", "mdi:format-list-numbered"),
+                    ("device_info_service_found", "Device Information service found", "mdi:bluetooth-settings"),
+                    ("battery_characteristic_handle", "Battery characteristic handle", "mdi:identifier"),
+                    ("battery_cccd_found", "Battery CCCD found", "mdi:bell-check"),
+                    ("battery_cccd_handle", "Battery CCCD handle", "mdi:identifier"),
+                    ("battery_write_attempted", "Battery write attempted", "mdi:upload"),
+                    ("battery_raw_response", "Battery raw response", "mdi:code-braces"),
                     ("connection_state", "Connection state", "mdi:bluetooth-connect"),
                     ("last_stage", "Last communication stage", "mdi:timeline-text-outline"),
                     ("last_error", "Last BLE error", "mdi:alert-circle-outline"),
@@ -174,6 +193,20 @@ class MiViaRssiSensor(MiViaBaseSensor):
 
     def __init__(self, coordinator: MiViaCoordinator, entry) -> None:
         super().__init__(coordinator, entry, "rssi", "Bluetooth signal", "mdi:bluetooth")
+
+
+class MiViaGattInventorySensor(MiViaBaseSensor):
+    """Summary of the discovered GATT database, with full inventory as attributes."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: MiViaCoordinator, entry) -> None:
+        super().__init__(coordinator, entry, "gatt_service_count", "GATT inventory", "mdi:bluetooth-settings")
+
+    @property
+    def extra_state_attributes(self):
+        """Expose service, characteristic, property and descriptor metadata."""
+        return {"services": self.coordinator.data.get("gatt_inventory", [])}
 
 
 class MiViaDiagnosticSensor(MiViaBaseSensor):
