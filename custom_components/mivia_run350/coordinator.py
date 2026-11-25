@@ -326,27 +326,40 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                 battery_properties = {
                     prop.lower() for prop in battery_characteristic.properties
                 }
+                packet_data["battery_characteristic_properties"] = ", ".join(
+                    sorted(battery_properties)
+                )
                 if "write-without-response" in battery_properties:
                     battery_write_response = False
+                    packet_data["battery_write_mode"] = "without_response"
                 elif "write" in battery_properties:
                     battery_write_response = True
+                    packet_data["battery_write_mode"] = "with_response"
+                else:
+                    packet_data["battery_write_mode"] = "unsupported"
                 else:
                     _LOGGER.warning(
                         "MiVia battery characteristic has no supported write property: %s",
                         sorted(battery_properties),
                     )
             else:
+                packet_data["battery_characteristic_properties"] = "not_found"
+                packet_data["battery_write_mode"] = "not_found"
                 _LOGGER.warning(
                     "MiVia battery characteristic %s was not found in GATT",
                     BATTERY_CONTROL_CHARACTERISTIC_UUID,
                 )
 
+            packet_data["battery_notify_started"] = False
+            packet_data["battery_request_sent"] = False
+            packet_data["battery_response_received"] = False
             set_stage("subscribe_battery")
             try:
                 await client.start_notify(
                     BATTERY_CONTROL_CHARACTERISTIC_UUID, battery_handler
                 )
                 battery_notify_started = True
+                packet_data["battery_notify_started"] = True
                 _LOGGER.debug(
                     "MiVia battery notifications enabled on %s",
                     BATTERY_CONTROL_CHARACTERISTIC_UUID,
@@ -421,6 +434,7 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                         response=battery_write_response,
                     )
                     battery_request_sent = True
+                    packet_data["battery_request_sent"] = True
                 except Exception as err:  # noqa: BLE001
                     packet_data["last_error"] = (
                         "Battery request write failed: "
@@ -495,6 +509,7 @@ class MiViaCoordinator(DataUpdateCoordinator[dict]):
                                 attempt + 1,
                             )
 
+            packet_data["battery_response_received"] = battery_received.is_set()
             packet_data["connection_state"] = "idle"
             packet_data["last_stage"] = "complete"
             packet_data["last_success"] = datetime.now(timezone.utc)
