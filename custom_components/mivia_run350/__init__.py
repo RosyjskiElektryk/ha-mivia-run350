@@ -15,8 +15,12 @@ PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up MiVia from a config entry."""
     coordinator = MiViaCoordinator(hass, entry)
+    # Keep the integration loaded when the watch is temporarily unavailable.
+    # The coordinator will retry on its normal update interval after platforms
+    # are set up, instead of failing config-entry setup on the first BLE miss.
+    coordinator.data = {}
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
-    await coordinator.async_config_entry_first_refresh()
+    await coordinator.async_refresh()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
